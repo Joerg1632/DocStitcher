@@ -5,3 +5,7 @@ build/
 *.spec
 .venv/
 MergedPDFs/
+*.jpg
+*.doc
+*.docx
+*.pdf
