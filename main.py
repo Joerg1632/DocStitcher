@@ -20,7 +20,7 @@ def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
     else:
-        base_path = os.path.abspath("..")
+        base_path = os.path.abspath("")
     return os.path.join(base_path, relative_path)
 
 class MyWindow(QWidget):
@@ -37,7 +37,7 @@ class MyWindow(QWidget):
 
     def initUI(self):
         self.setWindowTitle("Объединение документов")
-        self.setWindowIcon(QIcon(resource_path("../assets/app_icon.png")))
+        self.setWindowIcon(QIcon(resource_path("assets/app_icon.png")))
         self.setGeometry(100, 100, 400, 300)
 
         self.list_widget = DragDropListWidget(self)
@@ -131,9 +131,9 @@ class MyWindow(QWidget):
             doc = fitz.open(pdf_path)
             new_doc = fitz.open()
 
-            ribbon_path = resource_path("../assets/ribbon.png")
-            dot1_path = resource_path("../assets/dot1.png")
-            dot2_path = resource_path("../assets/dot2.png")
+            ribbon_path = resource_path("assets/ribbon.png")
+            dot1_path = resource_path("assets/dot1.png")
+            dot2_path = resource_path("assets/dot2.png")
 
             for page_num in range(len(doc) - 1):
                 page = doc.load_page(page_num)
