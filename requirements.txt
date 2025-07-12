@@ -6,3 +6,4 @@ Pillow~=10.4.0
 numpy~=2.3.1
 opencv-python~=4.11.0.86
 PyMuPDF~=1.26.3
+img2pdf
