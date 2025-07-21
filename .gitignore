@@ -4,7 +4,7 @@ build/
 *.pkg
 *.spec
 .venv/
-MergedPDFs/
+Итоговые документы/
 *.jpg
 *.doc
 *.docx
