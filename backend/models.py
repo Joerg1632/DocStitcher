@@ -2,12 +2,12 @@ import sqlalchemy
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-from database import Base
+from backend.database import Base
 
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True)  # Автоинкремент
+    id = Column(Integer, primary_key=True)
 
     licenses = relationship("License", back_populates="user")
 

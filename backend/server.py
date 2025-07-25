@@ -1,17 +1,23 @@
 from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from database import SessionLocal
-import models
+from backend.database import SessionLocal
+from backend import models
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 import jwt
 import os
+from dotenv import load_dotenv
+
+from backend.models import LicenseDevice, LicenseType, License
 
 app = FastAPI()
 security = HTTPBearer()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
+load_dotenv()
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY не установлен в переменных окружения")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 дней
 
@@ -47,6 +53,8 @@ class LicenseTypeCreate(BaseModel):
     allowed_devices: int | None = None
     expires_days: int | None = None
 
+class TrialActivateRequest(BaseModel):
+    device_id: str
 # ------------------------ Вспомогательные функции ------------------------
 
 def get_db():
@@ -82,6 +90,58 @@ def check_license_expiration(license: models.License, db: Session):
             raise HTTPException(status_code=403, detail="Лицензия истекла")
 
 # ------------------------ Эндпоинты ------------------------
+@app.post("/activate_trial")
+def activate_trial(data: dict, db: Session = Depends(get_db)):
+    device_id = data.get("device_id")
+    # Проверяем, не активирована ли пробная лицензия для этого устройства
+    existing_device = db.query(LicenseDevice).join(License).filter(
+        LicenseDevice.device_id == device_id,
+        License.license_type_code == "LICENSE-TRIAL"
+    ).first()
+    if existing_device:
+        raise HTTPException(status_code=403, detail="Пробная версия уже активирована на этом устройстве")
+
+    # Создаём новую пробную лицензию
+    license_type = db.query(LicenseType).filter(LicenseType.code == "LICENSE-TRIAL").first()
+    if not license_type:
+        raise HTTPException(status_code=404, detail="Тип лицензии не найден")
+
+    license = License(
+        license_type_code="LICENSE-TRIAL",
+        created_at=datetime.now(timezone.utc),
+        is_active=True
+    )
+    db.add(license)
+    db.commit()
+    db.refresh(license)
+
+    # Привязываем устройство
+    license_device = LicenseDevice(
+        license_id=license.id,
+        device_id=device_id
+    )
+    db.add(license_device)
+    db.commit()
+
+    # Генерируем JWT-токен
+    from jwt import encode
+    token = encode({"license_id": license.id, "device_id": device_id}, SECRET_KEY, algorithm="HS256")
+    return {"access_token": token}
+
+@app.get("/license/{license_id}")
+def get_license(license_id: int, credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
+    payload = verify_token(credentials.credentials)
+    license = db.query(models.License).filter(models.License.id == license_id).first()
+    if not license:
+        raise HTTPException(status_code=404, detail="Лицензия не найдена")
+    check_license_expiration(license, db)
+    return {
+        "license_id": license.id,
+        "license_type_code": license.license_type_code,
+        "created_at": license.created_at.isoformat(),
+        "is_active": license.is_active,
+        "expires_days": license.license_type.expires_days
+    }
 
 @app.get("/license_types")
 def get_license_types(db: Session = Depends(get_db)):
@@ -212,27 +272,64 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
     access_token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return LicenseActivateResponse(access_token=access_token)
 
+
 @app.get("/verify")
 def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
-    payload = verify_token(credentials.credentials)
+    payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
     license_id = payload.get("license_id")
     device_id = payload.get("device_id")
-
-    license = db.query(models.License).filter(models.License.id == license_id).first()
+    license = db.query(License).filter(License.id == license_id).first()
     if not license:
         raise HTTPException(status_code=404, detail="Лицензия не найдена")
-
     if not license.is_active:
         raise HTTPException(status_code=403, detail="Лицензия не активна")
 
-    check_license_expiration(license, db)
+    # Проверка лимита устройств
+    device_count = db.query(LicenseDevice).filter(LicenseDevice.license_id == license_id).count()
+    allowed_devices = license.license_type.allowed_devices
+    if device_count > allowed_devices:
+        raise HTTPException(status_code=403, detail="Превышен лимит устройств")
 
-    device = db.query(models.LicenseDevice).filter(
-        models.LicenseDevice.license_id == license.id,
-        models.LicenseDevice.device_id == device_id
+    # Проверка устройства
+    device = db.query(LicenseDevice).filter(
+        LicenseDevice.license_id == license_id,
+        LicenseDevice.device_id == device_id
     ).first()
-
     if not device:
         raise HTTPException(status_code=403, detail="Устройство не активировано")
 
+    # Проверка срока действия
+    if license.license_type.expires_days is not None:
+        expiration_date = license.created_at + timedelta(days=license.license_type.expires_days)
+        if expiration_date < datetime.now(timezone.utc):
+            license.is_active = False
+            db.commit()
+            raise HTTPException(status_code=403, detail="Лицензия истекла")
+
     return {"status": "ok", "message": "Лицензия и устройство валидны"}
+
+
+@app.post("/deactivate_device")
+def deactivate_device(data: dict, db: Session = Depends(get_db)):
+    user_id = data.get("user_id")  # Предполагается аутентификация
+    device_id = data.get("device_id")
+    license_id = data.get("license_id")
+
+    # Проверяем, что устройство принадлежит пользователю
+    license = db.query(License).filter(
+        License.id == license_id,
+        License.user_id == user_id
+    ).first()
+    if not license:
+        raise HTTPException(status_code=404, detail="Лицензия не найдена или не принадлежит пользователю")
+
+    device = db.query(LicenseDevice).filter(
+        LicenseDevice.license_id == license_id,
+        LicenseDevice.device_id == device_id
+    ).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Устройство не найдено")
+
+    db.delete(device)
+    db.commit()
+    return {"status": "ok", "message": "Устройство деактивировано"}
