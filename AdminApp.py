@@ -7,7 +7,7 @@ from uuid import uuid4
 import pyperclip
 import os
 
-SERVER_URL = "https://f5e4c1abee19.ngrok-free.app"  # Адрес сервера, замените на реальный
+SERVER_URL = "http://localhost:8000"  # Адрес сервера, замените на реальный
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):

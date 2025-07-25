@@ -275,38 +275,52 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
 
 @app.get("/verify")
 def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
-    payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
-    license_id = payload.get("license_id")
-    device_id = payload.get("device_id")
-    license = db.query(License).filter(License.id == license_id).first()
-    if not license:
-        raise HTTPException(status_code=404, detail="Лицензия не найдена")
-    if not license.is_active:
-        raise HTTPException(status_code=403, detail="Лицензия не активна")
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+        license_id = payload.get("license_id")
+        device_id = payload.get("device_id")
+        print(f"[DEBUG] Verifying license_id={license_id}, device_id={device_id}")
 
-    # Проверка лимита устройств
-    device_count = db.query(LicenseDevice).filter(LicenseDevice.license_id == license_id).count()
-    allowed_devices = license.license_type.allowed_devices
-    if device_count > allowed_devices:
-        raise HTTPException(status_code=403, detail="Превышен лимит устройств")
+        license = db.query(License).filter(License.id == license_id).first()
+        if not license:
+            print(f"[DEBUG] License not found for license_id={license_id}")
+            raise HTTPException(status_code=404, detail="Лицензия не найдена")
+        if not license.is_active:
+            print(f"[DEBUG] License is not active: license_id={license_id}")
+            raise HTTPException(status_code=403, detail="Лицензия не активна")
 
-    # Проверка устройства
-    device = db.query(LicenseDevice).filter(
-        LicenseDevice.license_id == license_id,
-        LicenseDevice.device_id == device_id
-    ).first()
-    if not device:
-        raise HTTPException(status_code=403, detail="Устройство не активировано")
+        # Проверка лимита устройств
+        device_count = db.query(LicenseDevice).filter(LicenseDevice.license_id == license_id).count()
+        allowed_devices = license.license_type.allowed_devices
+        print(f"[DEBUG] Device count: {device_count}, Allowed devices: {allowed_devices}")
+        if allowed_devices is not None and device_count > allowed_devices:
+            print(f"[DEBUG] Device limit exceeded: {device_count} > {allowed_devices}")
+            raise HTTPException(status_code=403, detail="Превышен лимит устройств")
 
-    # Проверка срока действия
-    if license.license_type.expires_days is not None:
-        expiration_date = license.created_at + timedelta(days=license.license_type.expires_days)
-        if expiration_date < datetime.now(timezone.utc):
-            license.is_active = False
-            db.commit()
-            raise HTTPException(status_code=403, detail="Лицензия истекла")
+        # Проверка устройства
+        device = db.query(LicenseDevice).filter(
+            LicenseDevice.license_id == license_id,
+            LicenseDevice.device_id == device_id
+        ).first()
+        if not device:
+            print(f"[DEBUG] Device not activated: device_id={device_id}")
+            raise HTTPException(status_code=403, detail="Устройство не активировано")
 
-    return {"status": "ok", "message": "Лицензия и устройство валидны"}
+        # Проверка срока действия
+        if license.license_type.expires_days is not None:
+            expiration_date = license.created_at + timedelta(days=license.license_type.expires_days)
+            print(f"[DEBUG] Expiration check: expiration_date={expiration_date}, now={datetime.now(timezone.utc)}")
+            if expiration_date < datetime.now(timezone.utc):
+                license.is_active = False
+                db.commit()
+                print(f"[DEBUG] License expired: license_id={license_id}")
+                raise HTTPException(status_code=403, detail="Лицензия истекла")
+
+        print(f"[DEBUG] License verified successfully: license_id={license_id}")
+        return {"status": "ok", "message": "Лицензия и устройство валидны"}
+    except Exception as e:
+        print(f"[DEBUG] Error in verify: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка сервера: {str(e)}")
 
 
 @app.post("/deactivate_device")
