@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QToolButton, QMenu
 )
 from PyQt5.QtGui import QIcon, QFont
-from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtCore import QSettings, Qt, QTimer
 from file_processing import save, save_as, convert_to_pdf, convert_doc_to_pdf, convert_image_to_pdf, update_progress, apply_scan_effect
 from licensing import update_license_status, check_license_periodically, deactivate_device_action, on_change_license_clicked
 from client_utils import resource_path, get_device_id, verify_token, is_trial_valid, activate_license
@@ -137,8 +137,10 @@ class MyWindow(QWidget):
         self.setWindowTitle("DocStitcher (Не активировано)")
         self.setWindowIcon(QIcon(resource_path("assets/app_icon.png")))
         self.setGeometry(100, 100, 450, 300)
+
         license_button = QToolButton(self)
         license_button.setText("Лицензия")
+
         license_button.setPopupMode(QToolButton.InstantPopup)
         license_button.setStyleSheet("""
             QToolButton {
@@ -160,9 +162,11 @@ class MyWindow(QWidget):
             }
         """)
         license_menu = QMenu(license_button)
+
         self.deactivate_action = license_menu.addAction("Деактивировать устройство")
         self.change_license_action = license_menu.addAction("Сменить лицензию")
         license_button.setMenu(license_menu)
+
         self.deactivate_action.triggered.connect(self.deactivate_device_action)
         self.change_license_action.triggered.connect(self.on_change_license_clicked)
         self.list_widget = DragDropListWidget(self)
@@ -217,6 +221,11 @@ class MyWindow(QWidget):
         main_layout.addLayout(checkbox_layout)
         self.setLayout(main_layout)
         self.update_license_status()
+
+        self.license_timer = QTimer(self)
+        self.license_timer.timeout.connect(self.check_license_periodically)
+        self.license_timer.start(60000)
+
         self.update_action_states()
 
     def get_directory(self):

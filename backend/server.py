@@ -160,18 +160,6 @@ def get_license_types(db: Session = Depends(get_db)):
 
 @app.post("/create_license")
 def create_license(data: LicenseCreate, db: Session = Depends(get_db)):
-    # Создаём нового пользователя автоматически, если user_id не указан
-    if data.user_id is None:
-        user = models.User()
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        user_id = user.id
-    else:
-        user = db.query(models.User).filter(models.User.id == data.user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-        user_id = data.user_id
 
     license_type = db.query(models.LicenseType).filter(models.LicenseType.code == data.license_type_code).first()
     if not license_type:
@@ -182,7 +170,7 @@ def create_license(data: LicenseCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Лицензия с таким ключом уже существует")
 
     license = models.License(
-        user_id=user_id,
+        user_id=None,
         license_type_code=data.license_type_code,
         license_key=data.license_key,
         created_at=datetime.now(timezone.utc),
@@ -191,7 +179,7 @@ def create_license(data: LicenseCreate, db: Session = Depends(get_db)):
     db.add(license)
     db.commit()
     db.refresh(license)
-    return {"license_key": license.license_key, "user_id": user_id}
+    return {"license_key": license.license_key, "user_id": None}
 @app.post("/create_license_type")
 def create_license_type(data: LicenseTypeCreate, db: Session = Depends(get_db)):
     existing = db.query(models.LicenseType).filter(models.LicenseType.code == data.code).first()
@@ -265,6 +253,7 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
 
 @app.post("/activate", response_model=LicenseActivateResponse)
 def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_db)):
+    # Найти новую лицензию по license_key
     license = db.query(models.License).filter(models.License.license_key == request.license_key).first()
     if not license:
         raise HTTPException(status_code=404, detail="Лицензия не найдена")
@@ -272,34 +261,62 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
     if not license.is_active:
         raise HTTPException(status_code=403, detail="Лицензия не активна")
 
-    check_license_expiration(license, db)
+    old_license_device = db.query(models.LicenseDevice).join(models.License).filter(
+        models.LicenseDevice.device_id == request.device_id,
+        models.License.license_type_code == "LICENSE-TRIAL"
+    ).first()
 
-    existing_device = db.query(models.LicenseDevice).filter(
+    user_id = None
+    if old_license_device:
+        old_license = old_license_device.license
+        user_id = old_license.user_id
+        db.delete(old_license_device)
+        db.delete(old_license)
+
+    existing_new_device = db.query(models.LicenseDevice).filter(
         models.LicenseDevice.license_id == license.id,
         models.LicenseDevice.device_id == request.device_id
     ).first()
+    if existing_new_device:
+        if license.user_id is None:
+            raise HTTPException(status_code=400, detail="Лицензия не привязана к пользователю")
+        token_data = {
+            "license_id": license.id,
+            "device_id": request.device_id,
+            "user_id": license.user_id
+        }
+        access_token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+        return LicenseActivateResponse(access_token=access_token)
 
-    if not existing_device:
-        count = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == license.id).count()
-        allowed = license.license_type.allowed_devices
-        if allowed is not None and count >= allowed:
-            raise HTTPException(status_code=403, detail="Превышено число устройств")
+    device_count = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == license.id).count()
+    allowed_devices = license.license_type.allowed_devices
+    if allowed_devices is not None and device_count >= allowed_devices:
+        raise HTTPException(status_code=403, detail="Превышено число устройств")
 
-        new_device = models.LicenseDevice(
-            license_id=license.id,
-            device_id=request.device_id,
-            activated_at=datetime.now(timezone.utc)
-        )
-        db.add(new_device)
-        db.commit()
+    if license.user_id is None:
+        if user_id is not None:
+            license.user_id = user_id
+        else:
+            user = models.User()
+            db.add(user)
+            db.flush()
+            license.user_id = user.id
+
+    new_device = models.LicenseDevice(
+        license_id=license.id,
+        device_id=request.device_id,
+        activated_at=datetime.now(timezone.utc)
+    )
+    db.add(new_device)
+    db.commit()
 
     token_data = {
         "license_id": license.id,
-        "device_id": request.device_id
+        "device_id": request.device_id,
+        "user_id": license.user_id
     }
     access_token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return LicenseActivateResponse(access_token=access_token)
-
 
 @app.get("/verify")
 def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):

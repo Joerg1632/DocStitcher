@@ -24,7 +24,7 @@ class License(Base):
     __tablename__ = "licenses"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     license_type_code = Column(String(50), ForeignKey("license_types.code"), nullable=False)
     license_key = Column(String(36), unique=True, nullable=False)  # UUID
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
