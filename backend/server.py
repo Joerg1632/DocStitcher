@@ -1,6 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends, Security
+import uuid
+
+from fastapi import FastAPI, HTTPException, Depends, Security, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+
 from backend.database import SessionLocal
 from backend import models
 from sqlalchemy.orm import Session
@@ -9,7 +12,7 @@ import jwt
 import os
 from dotenv import load_dotenv
 
-from backend.models import LicenseDevice, LicenseType, License
+from backend.models import LicenseDevice, LicenseType, License, User
 
 app = FastAPI()
 security = HTTPBearer()
@@ -26,6 +29,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 дней
 class UserCreate(BaseModel):
     username: str
     email: str
+
+class LicenseChangeRequest(BaseModel):
+    user_id: int
+    new_license_key: str
 
 class LicenseCreate(BaseModel):
     user_id: int | None = None
@@ -83,7 +90,7 @@ def check_license_expiration(license: models.License, db: Session):
     now = datetime.now(timezone.utc)
     expires_days = license.license_type.expires_days
     if expires_days is not None:
-        expiration_date = license.created_at + timedelta(days=expires_days)
+        expiration_date = license.created_at + timedelta(minutes=expires_days)
         if expiration_date < now:
             license.is_active = False
             db.commit()
@@ -91,23 +98,26 @@ def check_license_expiration(license: models.License, db: Session):
 
 # ------------------------ Эндпоинты ------------------------
 @app.post("/activate_trial")
-def activate_trial(data: dict, db: Session = Depends(get_db)):
-    device_id = data.get("device_id")
-    # Проверяем, не активирована ли пробная лицензия для этого устройства
-    existing_device = db.query(LicenseDevice).join(License).filter(
+def activate_trial(device_id: str = Form(...), db: Session = Depends(get_db)):
+    # Проверка, активирована ли пробная версия на этом устройстве
+    existing_device = db.query(LicenseDevice).join(License).join(User).filter(
         LicenseDevice.device_id == device_id,
         License.license_type_code == "LICENSE-TRIAL"
     ).first()
     if existing_device:
-        raise HTTPException(status_code=403, detail="Пробная версия уже активирована на этом устройстве")
+        raise HTTPException(status_code=403, detail="Пробная версия уже была активирована на этом устройстве")
 
-    # Создаём новую пробную лицензию
-    license_type = db.query(LicenseType).filter(LicenseType.code == "LICENSE-TRIAL").first()
-    if not license_type:
-        raise HTTPException(status_code=404, detail="Тип лицензии не найден")
+    # Создание нового пользователя, если его еще нет (автоинкрементный user_id)
+    user = User()
+    db.add(user)
+    db.commit()  # Коммит для получения автоинкрементного id
+    db.refresh(user)
 
+    # Создание новой пробной лицензии с привязкой к user_id
     license = License(
+        user_id=user.id,
         license_type_code="LICENSE-TRIAL",
+        license_key=str(uuid.uuid4()),  # Генерация уникального ключа
         created_at=datetime.now(timezone.utc),
         is_active=True
     )
@@ -115,18 +125,18 @@ def activate_trial(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(license)
 
-    # Привязываем устройство
-    license_device = LicenseDevice(
-        license_id=license.id,
-        device_id=device_id
-    )
+    # Активация устройства
+    license_device = LicenseDevice(license_id=license.id, device_id=device_id, activated_at=datetime.now(timezone.utc))
     db.add(license_device)
     db.commit()
 
-    # Генерируем JWT-токен
-    from jwt import encode
-    token = encode({"license_id": license.id, "device_id": device_id}, SECRET_KEY, algorithm="HS256")
-    return {"access_token": token}
+    # Генерация токена
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"license_id": license.id, "device_id": device_id, "user_id": user.id},
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/license/{license_id}")
 def get_license(license_id: int, credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
@@ -197,7 +207,13 @@ def create_license_type(data: LicenseTypeCreate, db: Session = Depends(get_db)):
     return {"message": "Тип лицензии создан"}
 
 @app.post("/change_license")
-def change_license(data: LicenseChangeRequest, db: Session = Depends(get_db)):
+def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+    # Декодирование токена для проверки user_id
+    payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+    token_user_id = payload.get("user_id")
+    if not token_user_id or token_user_id != data.user_id:
+        raise HTTPException(status_code=401, detail="Недействительный токен или user_id")
+
     user = db.query(models.User).filter(models.User.id == data.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
@@ -216,8 +232,10 @@ def change_license(data: LicenseChangeRequest, db: Session = Depends(get_db)):
     if new_license.user_id is not None and new_license.user_id != data.user_id:
         raise HTTPException(status_code=400, detail="Новая лицензия уже назначена другому пользователю")
 
+    # Проверка срока действия старой лицензии
     check_license_expiration(old_license, db)
 
+    # Перенос устройств
     devices = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == old_license.id).all()
     for device in devices:
         existing = db.query(models.LicenseDevice).filter(
@@ -229,11 +247,21 @@ def change_license(data: LicenseChangeRequest, db: Session = Depends(get_db)):
         else:
             db.delete(device)
 
+    # Деактивация старой и активация новой лицензии
     old_license.is_active = False
     new_license.user_id = data.user_id
     new_license.is_active = True
+    new_license.created_at = datetime.now(timezone.utc)  # Сброс срока действия
     db.commit()
-    return {"message": "Лицензия изменена, устройства перенесены"}
+
+    # Генерация нового токена
+    device_id = devices[0].device_id if devices else "default_device_id"  # Берем первый device_id или задаем дефолт
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"license_id": new_license.id, "device_id": device_id, "user_id": data.user_id},
+        expires_delta=access_token_expires
+    )
+    return {"message": "Лицензия изменена, устройства перенесены", "access_token": access_token, "token_type": "bearer"}
 
 @app.post("/activate", response_model=LicenseActivateResponse)
 def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_db)):
@@ -308,7 +336,7 @@ def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: S
 
         # Проверка срока действия
         if license.license_type.expires_days is not None:
-            expiration_date = license.created_at + timedelta(days=license.license_type.expires_days)
+            expiration_date = license.created_at + timedelta(minutes=license.license_type.expires_days)
             print(f"[DEBUG] Expiration check: expiration_date={expiration_date}, now={datetime.now(timezone.utc)}")
             if expiration_date < datetime.now(timezone.utc):
                 license.is_active = False
