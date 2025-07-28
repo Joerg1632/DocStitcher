@@ -140,6 +140,7 @@ class MyWindow(QWidget):
 
         license_button = QToolButton(self)
         license_button.setText("Лицензия")
+        license_button.setToolTip("Взаимодействие с лицензией")
 
         license_button.setPopupMode(QToolButton.InstantPopup)
         license_button.setStyleSheet("""
@@ -166,6 +167,8 @@ class MyWindow(QWidget):
         self.deactivate_action = license_menu.addAction("Деактивировать устройство")
         self.change_license_action = license_menu.addAction("Сменить лицензию")
         license_button.setMenu(license_menu)
+        self.deactivate_action.setToolTip("Деактивировать лицензию на текущем устройстве и освободить место лицензии")
+        self.change_license_action.setToolTip("Сменить лицензию на другую")
 
         self.deactivate_action.triggered.connect(self.deactivate_device_action)
         self.change_license_action.triggered.connect(self.on_change_license_clicked)

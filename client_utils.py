@@ -95,7 +95,7 @@ def activate_license(license_key, device_id):
 def deactivate_device(license_token, device_id):
     try:
         response = requests.post(
-            f"{SERVER_URL}/deactivate",
+            f"{SERVER_URL}/deactivate_device",
             json={"device_id": device_id},
             headers={"Authorization": f"Bearer {license_token}"}
         )
