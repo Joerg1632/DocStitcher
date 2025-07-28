@@ -10,12 +10,16 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 import jwt
 import os
+import logging
 from dotenv import load_dotenv
 
 from backend.models import LicenseDevice, LicenseType, License, User
 
 app = FastAPI()
 security = HTTPBearer()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -33,6 +37,7 @@ class UserCreate(BaseModel):
 class LicenseChangeRequest(BaseModel):
     user_id: int
     new_license_key: str
+    device_id: str
 
 class LicenseCreate(BaseModel):
     user_id: int | None = None
@@ -42,10 +47,6 @@ class LicenseCreate(BaseModel):
 class LicenseAssignRequest(BaseModel):
     user_id: int
     license_key: str
-
-class LicenseChangeRequest(BaseModel):
-    user_id: int
-    new_license_key: str
 
 class LicenseActivateRequest(BaseModel):
     license_key: str
@@ -196,60 +197,76 @@ def create_license_type(data: LicenseTypeCreate, db: Session = Depends(get_db)):
 
 @app.post("/change_license")
 def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    # Декодирование токена для проверки user_id
-    payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+    logger.info(f"Смена лицензии: user_id={data.user_id}, new_license_key={data.new_license_key}, device_id={data.device_id}")
+
+    # Декодирование токена для проверки user_id и device_id
+    payload = verify_token(credentials.credentials)
     token_user_id = payload.get("user_id")
+    token_device_id = payload.get("device_id")
     if not token_user_id or token_user_id != data.user_id:
+        logger.error(f"Недействительный user_id: token_user_id={token_user_id}, data.user_id={data.user_id}")
         raise HTTPException(status_code=401, detail="Недействительный токен или user_id")
+    if not token_device_id or token_device_id != data.device_id:
+        logger.error(f"Недействительный device_id: token_device_id={token_device_id}, data.device_id={data.device_id}")
+        raise HTTPException(status_code=401, detail="Недействительный токен или device_id")
 
-    user = db.query(models.User).filter(models.User.id == data.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
+    # Найти текущую активную лицензию
     old_license = db.query(models.License).filter(
         models.License.user_id == data.user_id,
         models.License.is_active == True
     ).first()
-    if not old_license:
-        raise HTTPException(status_code=404, detail="У пользователя нет активной лицензии")
 
+    # Найти новую лицензию
     new_license = db.query(models.License).filter(models.License.license_key == data.new_license_key).first()
     if not new_license:
+        logger.error(f"Новая лицензия не найдена: license_key={data.new_license_key}")
         raise HTTPException(status_code=404, detail="Новая лицензия не найдена")
 
-    if new_license.user_id is not None and new_license.user_id != data.user_id:
-        raise HTTPException(status_code=400, detail="Новая лицензия уже назначена другому пользователю")
+    # Проверяем лимит устройств для новой лицензии
+    device_count = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == new_license.id).count()
+    old_devices = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == old_license.id).all()
+    allowed_devices = new_license.license_type.allowed_devices
+    if allowed_devices is not None and device_count >= allowed_devices:
+        logger.error(f"Превышен лимит устройств: device_count={device_count}, allowed_devices={allowed_devices}")
+        raise HTTPException(status_code=403, detail="Превышен лимит устройств")
 
-    # Проверка срока действия старой лицензии
-    check_license_expiration(old_license, db)
+    if old_license.license_type_code == "LICENSE-TRIAL":
+        old_license.is_active = False
 
-    # Перенос устройств
-    devices = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == old_license.id).all()
-    for device in devices:
-        existing = db.query(models.LicenseDevice).filter(
-            models.LicenseDevice.license_id == new_license.id,
-            models.LicenseDevice.device_id == device.device_id
-        ).first()
-        if not existing:
-            device.license_id = new_license.id
-        else:
-            db.delete(device)
+    # Если старая лицензия платная, требуем AdminApp
+    if old_license.license_type_code != "LICENSE-TRIAL":
+        logger.error(f"Нельзя сменить платную лицензию через этот эндпоинт: license_id={old_license.id}, user_id={data.user_id}")
+        raise HTTPException(status_code=403, detail="Смена платной лицензии возможна только через администратора")
 
-    # Деактивация старой и активация новой лицензии
-    old_license.is_active = False
-    new_license.user_id = data.user_id
-    new_license.is_active = True
-    new_license.created_at = datetime.now(timezone.utc)  # Сброс срока действия
-    db.commit()
+    # Проверка и создание записи для устройства в новой лицензии
+    existing = db.query(models.LicenseDevice).filter(
+        models.LicenseDevice.license_id == new_license.id,
+        models.LicenseDevice.device_id == data.device_id
+    ).first()
+    if not existing:
+        new_device = models.LicenseDevice(
+            license_id=new_license.id,
+            device_id=data.device_id,
+            activated_at=datetime.now(timezone.utc)
+        )
+        db.add(new_device)
+        logger.info(f"Создано новое устройство для license_id={new_license.id}, device_id={data.device_id}")
+    else:
+        logger.info(f"Устройство уже существует в новой лицензии: device_id={data.device_id}, license_id={new_license.id}")
+
+    if old_license.license_type_code == "LICENSE-TRIAL":
+        new_license.user_id = data.user_id
+        new_license.is_active = True
+        new_license.created_at = datetime.now(timezone.utc)  # Сброс срока действия
+        db.commit()
 
     # Генерация нового токена
-    device_id = devices[0].device_id if devices else "default_device_id"  # Берем первый device_id или задаем дефолт
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"license_id": new_license.id, "device_id": device_id, "user_id": data.user_id},
-        expires_delta=access_token_expires
+        data={"license_id": new_license.id, "device_id": data.device_id, "user_id": data.user_id},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    return {"message": "Лицензия изменена, устройства перенесены", "access_token": access_token, "token_type": "bearer"}
+    logger.info(f"Лицензия изменена: user_id={data.user_id}, new_license_id={new_license.id}, device_id={data.device_id}")
+    return {"message": "Лицензия изменена, устройство привязано", "access_token": access_token, "token_type": "bearer"}
 
 @app.post("/activate", response_model=LicenseActivateResponse)
 def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_db)):
@@ -270,8 +287,6 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
     if old_license_device:
         old_license = old_license_device.license
         user_id = old_license.user_id
-        db.delete(old_license_device)
-        db.delete(old_license)
 
     existing_new_device = db.query(models.LicenseDevice).filter(
         models.LicenseDevice.license_id == license.id,

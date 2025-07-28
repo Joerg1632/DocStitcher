@@ -294,7 +294,7 @@ class MyWindow(QWidget):
                     payload = jwt.decode(license_token, SECRET_KEY,
                                         algorithms=["HS256"], options={"verify_exp": False})
                     license_id = payload.get("license_id")
-                    license_response = requests.get(f"{os.getenv('SERVER_URL', 'http://localhost:8000')}/license/{license_id}",
+                    license_response = requests.get(f"{SERVER_URL}/license/{license_id}",
                                                    headers={"Authorization": f"Bearer {license_token}"})
                     if license_response.status_code == 200:
                         license_data = license_response.json()
