@@ -111,18 +111,15 @@ def deactivate_device(license_token, device_id):
 
 def change_license(license_token, data):
     try:
-        url = f"{SERVER_URL}/change_license"
-        headers = {
-            "Authorization": f"Bearer {license_token}",
-            "Content-Type": "application/json"
-        }
-        print(f"[DEBUG] Отправляемые данные: {json.dumps(data)}")
-        response = requests.post(url, json=data, headers=headers, timeout=10)
-        print(f"[DEBUG] Ответ сервера: {response.status_code} - {response.text}")
-        response.raise_for_status()
-        return response
+        headers = {"Authorization": f"Bearer {license_token}"}
+        response = requests.post(f"{SERVER_URL}/change_license", json=data, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()["access_token"]
+        else:
+            error_detail = response.json().get("detail", "Ошибка смены лицензии")
+            QMessageBox.critical(None, "Ошибка", f"Не удалось сменить лицензию: {error_detail}")
+            return None
     except requests.RequestException as e:
-        print(f"[DEBUG] Ошибка запроса: {str(e)}")
         QMessageBox.critical(None, "Ошибка", f"Ошибка соединения с сервером: {str(e)}")
         return None
 

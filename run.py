@@ -113,8 +113,6 @@ class WelcomeDialog(QDialog):
             if token:
                 self.settings.setValue("license_token", token)
                 self.accept()
-            else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось активировать лицензию")
         else:
             QMessageBox.critical(self, "Ошибка", "Лицензионный ключ не введён")
 
@@ -163,6 +161,7 @@ class MyWindow(QWidget):
             }
         """)
         license_menu = QMenu(license_button)
+        license_menu.setToolTipsVisible(True)
 
         self.deactivate_action = license_menu.addAction("Деактивировать устройство")
         self.change_license_action = license_menu.addAction("Сменить лицензию")
