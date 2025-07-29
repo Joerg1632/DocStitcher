@@ -1,9 +1,8 @@
-from database import engine, Base
-import models  # импортируем модели, чтобы Base «увидел» их
+from backend.dbase import engine, Base
+import models
 
 def init_db():
-    Base.metadata.drop_all(bind=engine)  # Удалить все таблицы
-    Base.metadata.create_all(bind=engine)  # Создать заново
+    Base.metadata.create_all(bind=engine)
 
 if __name__ == "__main__":
     init_db()

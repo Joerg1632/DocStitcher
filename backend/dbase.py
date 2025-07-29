@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "postgresql+psycopg2://postgres:1234d@localhost:5432/docstitcher_db"
+DATABASE_URL = "postgresql+psycopg2://postgres:1234d@db:5432/docstitcher_db"
 
 engine = create_engine(DATABASE_URL, echo=True, future=True)
 

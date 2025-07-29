@@ -4,7 +4,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-from backend.database import engine, Base
+from backend.dbase import engine, Base
 # Импортируем все модели из backend.models
 from backend.models import User, LicenseType, License, LicenseDevice
 

@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends, Security, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from backend.database import SessionLocal
+from backend.dbase import SessionLocal
 from backend import models
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta, timezone

@@ -259,7 +259,6 @@ def apply_scan_effect(window, pdf_path, output_pdf=None):
     if output_pdf is None:
         output_pdf = pdf_path
     try:
-        start_time = time.perf_counter()
         dpi = 210
         a4_width_pt = 595
         a4_height_pt = 842
