@@ -30,13 +30,16 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY не установлен в переменных окружения")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 дней
+ACCESS_TOKEN_EXPIRE_DAYS = 30
 
 # ------------------------ Pydantic модели ------------------------
 
 class UserCreate(BaseModel):
     username: str
     email: str
+
+class TokenRefreshRequest(BaseModel):
+    token: str
 
 class LicenseChangeRequest(BaseModel):
     user_id: int
@@ -85,9 +88,9 @@ def verify_token(token: str):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Неверный токен")
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+def create_access_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    expire = datetime.now(timezone.utc) + expires_delta
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -95,7 +98,7 @@ def check_license_expiration(license: models.License, db: Session):
     now = datetime.now(timezone.utc)
     expires_days = license.license_type.expires_days
     if expires_days is not None:
-        expiration_date = license.created_at + timedelta(minutes=expires_days)
+        expiration_date = license.created_at + timedelta(days=expires_days)
         if expiration_date < now:
             license.is_active = False
             db.commit()
@@ -136,7 +139,7 @@ def activate_trial(device_id: str = Form(...), db: Session = Depends(get_db)):
     db.commit()
 
     # Генерация токена
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     access_token = create_access_token(
         data={"license_id": license.id, "device_id": device_id, "user_id": user.id},
         expires_delta=access_token_expires
@@ -253,7 +256,7 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
             "message": "Устройство добавлено к лицензии",
             "access_token": create_access_token(
                 data={"license_id": new_license.id, "device_id": data.device_id, "user_id": new_license.user_id},
-                expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                expires_delta=timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
             ),
             "token_type": "bearer"
         }
@@ -310,7 +313,7 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
         "message": "Лицензия успешно сменена",
         "access_token": create_access_token(
             data={"license_id": new_license.id, "device_id": data.device_id, "user_id": new_license.user_id},
-            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            expires_delta=timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
         ),
         "token_type": "bearer"
     }
@@ -347,7 +350,7 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
             "device_id": request.device_id,
             "user_id": license.user_id
         }
-        access_token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+        access_token = create_access_token(token_data, timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
         return LicenseActivateResponse(access_token=access_token)
 
     device_count = db.query(models.LicenseDevice).filter(models.LicenseDevice.license_id == license.id).count()
@@ -377,7 +380,7 @@ def activate_license(request: LicenseActivateRequest, db: Session = Depends(get_
         "device_id": request.device_id,
         "user_id": license.user_id
     }
-    access_token = create_access_token(token_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    access_token = create_access_token(token_data, timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
     return LicenseActivateResponse(access_token=access_token)
 
 @app.get("/verify")
@@ -415,7 +418,7 @@ def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: S
 
         # Проверка срока действия
         if license.license_type.expires_days is not None:
-            expiration_date = license.created_at + timedelta(minutes=license.license_type.expires_days)
+            expiration_date = license.created_at + timedelta(days=license.license_type.expires_days)
             print(f"[DEBUG] Expiration check: expiration_date={expiration_date}, now={datetime.now(timezone.utc)}")
             if expiration_date < datetime.now(timezone.utc):
                 license.is_active = False
@@ -461,3 +464,45 @@ def deactivate_device(data: dict, credentials: HTTPAuthorizationCredentials = De
         "status": "ok",
         "message": f"Устройство деактивировано. Удалено записей: {deleted_count}, TRIAL сохранена (если была)"
     }
+
+@app.post("/refresh_token")
+def refresh_token(request: TokenRefreshRequest, db: Session = Depends(get_db)):
+    try:
+        # Проверяем текущий токен
+        payload = verify_token(request.token)
+        license_id = payload.get("license_id")
+        device_id = payload.get("device_id")
+        user_id = payload.get("user_id")
+
+        # Проверяем, что лицензия всё ещё активна
+        license = db.query(models.License).filter(models.License.id == license_id).first()
+        if not license:
+            raise HTTPException(status_code=404, detail="Лицензия не найдена")
+        if not license.is_active:
+            raise HTTPException(status_code=403, detail="Лицензия не активна")
+
+        # Проверяем, что устройство привязано к лицензии
+        device = db.query(models.LicenseDevice).filter(
+            models.LicenseDevice.license_id == license_id,
+            models.LicenseDevice.device_id == device_id
+        ).first()
+        if not device:
+            raise HTTPException(status_code=403, detail="Устройство не активировано")
+
+        # Проверяем срок действия лицензии
+        check_license_expiration(license, db)
+
+        # Создаём новый токен
+        access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+        new_token = create_access_token(
+            data={"license_id": license_id, "device_id": device_id, "user_id": user_id},
+            expires_delta=access_token_expires
+        )
+        return {"access_token": new_token, "token_type": "bearer"}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Токен истёк")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Неверный токен")
+    except Exception as e:
+        print(f"[DEBUG] Ошибка при обновлении токена: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка сервера: {str(e)}")

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pyperclip
 import os
 
-SERVER_URL = "http://localhost:8000"  # Адрес сервера, замените на реальный
+SERVER_URL = "http://localhost:8000"
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -24,20 +24,17 @@ class AdminApp(QMainWindow):
         self.setGeometry(100, 100, 500, 300)
         self.setMinimumSize(400, 250)
 
-        # Основной контейнер и layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        # Заголовок
         title_label = QLabel("Генерация лицензионных ключей")
         title_label.setFont(QFont("Arial", 16, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(title_label)
 
-        # Выбор типа лицензии
         license_label = QLabel("Тип лицензии:")
         license_label.setFont(QFont("Arial", 12))
         layout.addWidget(license_label)
@@ -45,33 +42,28 @@ class AdminApp(QMainWindow):
         self.license_type.setFont(QFont("Arial", 11))
         layout.addWidget(self.license_type)
 
-        # Кнопка создания лицензии
         self.create_license_btn = QPushButton("Создать лицензию")
         self.create_license_btn.setFont(QFont("Arial", 12))
         self.create_license_btn.clicked.connect(self.create_license)
         layout.addWidget(self.create_license_btn)
 
-        # Кнопка копирования ключа
         self.copy_btn = QPushButton("Копировать ключ")
         self.copy_btn.setFont(QFont("Arial", 12))
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         self.copy_btn.setEnabled(False)
         layout.addWidget(self.copy_btn)
 
-        # Поле для результата (заменяем QLabel на QLineEdit для удобного копирования)
         self.result_label = QLineEdit()
         self.result_label.setFont(QFont("Arial", 11))
-        self.result_label.setReadOnly(True)  # Только чтение, чтобы предотвратить редактирование
+        self.result_label.setReadOnly(True)
         self.result_label.setAlignment(Qt.AlignCenter)
         self.result_label.setText("Ключ появится здесь после создания")
         layout.addWidget(self.result_label)
 
-        # Spacer для выравнивания
         layout.addStretch()
 
         self.central_widget.setLayout(layout)
 
-        # Стилизация
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #f5f5f5;
@@ -129,16 +121,14 @@ class AdminApp(QMainWindow):
             }
         """)
 
-        # Храним последний сгенерированный ключ
         self.last_license_key = ""
-        # Словарь соответствий кодов и русских названий
+
         self.code_to_name = {
             "LICENSE-1": "Лицензия на 1 устройство",
             "LICENSE-5": "Лицензия на 5 устройств",
             "LICENSE-15": "Лицензия на 15 устройств",
             "LICENSE-UNLIMITED": "Лицензия без ограничений"
         }
-        # Загружаем типы лицензий
         self.load_license_types()
 
     def load_license_types(self):

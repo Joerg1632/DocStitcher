@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 import jwt
@@ -26,14 +24,6 @@ def get_max_workers(page_count):
     cpu_count = mp.cpu_count()
     return cpu_count
 
-def plural_days(days):
-    if days % 10 == 1 and days % 100 != 11:
-        return f"{days} день"
-    elif 2 <= days % 10 <= 4 and (days % 100 < 10 or days % 100 >= 20):
-        return f"{days} дня"
-    else:
-        return f"{days} дней"
-
 def pt_to_px(pt, dpi):
     """Конвертирует пункты (pt) в пиксели (px) на основе DPI."""
     return int(pt * dpi / 72)
@@ -56,10 +46,11 @@ def is_trial_valid(settings):
                 license_data = license_response.json()
                 if license_data.get("license_type_code") == "LICENSE-TRIAL":
                     expires_days = license_data.get("expires_days", 2)
-                    minutes_passed = (datetime.now(timezone.utc) - datetime.fromisoformat(license_data.get("created_at"))).total_seconds() / 60
-                    minutes_left = expires_days - minutes_passed
-                    if minutes_left > 0:
-                        QMessageBox.information(None, "Пробный период", f"Вы используете пробную версию. Осталось {plural_days(minutes_left)}.")
+                    days_passed = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                        license_data.get("created_at"))).days
+                    days_left = expires_days - days_passed
+                    if days_left > 0:
+                        QMessageBox.information(None, "Пробный период", f"Вы используете пробную версию.")
                         return True
                     else:
                         return False

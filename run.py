@@ -226,7 +226,7 @@ class MyWindow(QWidget):
 
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self.check_license_periodically)
-        self.license_timer.start(60000)
+        self.license_timer.start(30000)
 
         self.update_action_states()
 
