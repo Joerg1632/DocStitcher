@@ -242,8 +242,8 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
         models.LicenseDevice.license_id == new_license.id
     ).count()
 
-    # === Сценарий 1 и 2: Новая лицензия уже активирована кем-то ===
-    if new_license.user_id is not None: #обработать случай, когда устройство сюда приходит с пробной лицензией, она не помечается как неактив
+    # === Если переходим с пробной или пустой лицензии в новую лицензию, то пробную надо деактивировать, а если новая лицензия не активировалась, то приписать ей юзер id и время активации
+    if old_license.license_type.code == "LICENSE-TRIAL":
         # Проверка: уже ли это устройство приписано
         existing = db.query(models.LicenseDevice).filter(
             models.LicenseDevice.license_id == new_license.id,
@@ -260,9 +260,10 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
                 activated_at=datetime.now(timezone.utc)
             ))
             logger.info("Устройство добавлено к существующей лицензии с user_id")
-            if old_license.license_type.code == "LICENSE-TRIAL":
-                old_license.is_active = False  # или old_license.deactivated_at = datetime.now(timezone.utc)
-                logger.info("Пробная лицензия помечена как неактивная")
+            old_license.is_active = False
+            logger.info("Пробная лицензия помечена как неактивная")
+            if new_license.user_id is None:
+                new_license.user_id = old_license.user_id
         db.commit()
         return {
             "message": "Устройство добавлено к лицензии",
@@ -273,25 +274,7 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
             "token_type": "bearer"
         }
 
-    # === Сценарии 3, 5: Новая лицензия пустая ===
-    if old_license.license_type_code == "LICENSE-TRIAL":
-        # Проверка вместимости
-        if allowed_devices is not None and current_device_count >= allowed_devices:
-            raise HTTPException(status_code=403, detail="Превышен лимит устройств")
-        # Назначаем user_id и переносим устройство
-        new_license.user_id = old_license.user_id
-        new_license.is_active = True
-        new_license.created_at = datetime.now(timezone.utc)
-
-        db.add(models.LicenseDevice(
-            license_id=new_license.id,
-            device_id=data.device_id,
-            activated_at=datetime.now(timezone.utc)
-        ))
-
-        old_license.is_active = False
-        logger.info("Переход с триала завершён")
-
+    #Если переходим не с пробной или пустой лицензии, то надо получить все девайсы на старой, далее перенести их на новую, потом удалить старую. Если новая не активировалась, добавить ей user id старой
     else:
         # Получить все устройства старой лицензии
         logger.info(f"new_license.id={new_license.id}")
@@ -302,7 +285,7 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
         logger.info(f"Devices count to transfer: {len(old_devices)}")
 
         if allowed_devices is not None and (current_device_count + len(old_devices)) > allowed_devices:
-            raise HTTPException(status_code=403, detail="Недостаточно слотов в новой лицензии для переноса устройств")
+            raise HTTPException(status_code=403, detail="Недостаточно слотов в новой лицензии для переноса устройств, деактивируйте лицензию на устройстве")
 
         for dev in old_devices:
             logger.info(f"Before change: device id={dev.id}, license_id={dev.license_id}")
@@ -311,9 +294,8 @@ def change_license(data: LicenseChangeRequest, credentials: HTTPAuthorizationCre
 
         db.flush()
 
-        # Перенос user_id и активация
-        new_license.user_id = old_license.user_id
-        new_license.created_at = datetime.now(timezone.utc)
+        if new_license.user_id is None:
+            new_license.user_id = old_license.user_id
 
         # Удаление старой лицензии
         db.delete(old_license)
