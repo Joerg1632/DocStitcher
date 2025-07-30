@@ -13,7 +13,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QSettings, Qt, QTimer
 from file_processing import save, save_as, convert_to_pdf, convert_doc_to_pdf, convert_image_to_pdf, update_progress, apply_scan_effect
-from licensing import update_license_status, check_license_periodically, deactivate_device_action, on_change_license_clicked
+from licensing import update_license_status, check_license_periodically, deactivate_device_action, \
+    on_change_license_clicked
 from client_utils import resource_path, get_device_id, verify_token, is_trial_valid, activate_license
 from config import SERVER_URL, SECRET_KEY
 
@@ -226,7 +227,7 @@ class MyWindow(QWidget):
 
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self.check_license_periodically)
-        self.license_timer.start(30000)
+        self.license_timer.start(3600000)
 
         self.update_action_states()
 
@@ -384,6 +385,7 @@ class DragDropListWidget(QListWidget):
         self.parent().file_lst = new_file_lst
         self.parent().file_name_lst = new_name_lst
         print("[*] Обновлен порядок файлов после перемещения внутри списка")
+
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()

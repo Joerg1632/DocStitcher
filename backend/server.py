@@ -146,20 +146,32 @@ def activate_trial(device_id: str = Form(...), db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 @app.get("/license/{license_id}")
-def get_license(license_id: int, credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
-    payload = verify_token(credentials.credentials)
-    license = db.query(models.License).filter(models.License.id == license_id).first()
-    if not license:
-        raise HTTPException(status_code=404, detail="Лицензия не найдена")
-    check_license_expiration(license, db)
-    return {
-        "license_id": license.id,
-        "license_type_code": license.license_type_code,
-        "created_at": license.created_at.isoformat(),
-        "is_active": license.is_active,
-        "expires_days": license.license_type.expires_days
-    }
+async def get_license(license_id: int, credentials: HTTPAuthorizationCredentials = Security(security),
+                      db: Session = Depends(get_db)):
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})  # Игнорируем exp
+        if payload.get("license_id") != license_id:
+            raise HTTPException(status_code=401, detail="Токен не соответствует лицензии")
+
+        license = db.query(models.License).options(joinedload(models.License.license_type)).filter(
+            models.License.id == license_id).first()
+        if not license or not license.is_active:
+            raise HTTPException(status_code=404, detail="Лицензия не найдена или неактивна")
+
+        check_license_expiration(license, db)
+
+        return {
+            "license_id": license.id,
+            "license_type_code": license.license_type_code,
+            "created_at": license.created_at.isoformat(),
+            "expires_days": license.license_type.expires_days,
+            "is_active": license.is_active
+        }
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Невалидный токен")
 
 @app.get("/license_types")
 def get_license_types(db: Session = Depends(get_db)):
@@ -433,76 +445,89 @@ def verify(credentials: HTTPAuthorizationCredentials = Security(security), db: S
         raise HTTPException(status_code=500, detail=f"Ошибка сервера: {str(e)}")
 
 @app.post("/deactivate_device")
-def deactivate_device(data: dict, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    # Разбираем токен, получаем user_id
-    payload = verify_token(credentials.credentials)
-    user_id = payload.get("user_id")
-    device_id = data.get("device_id")
+async def deactivate_device(data: dict, credentials: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
+    try:
+        token = credentials.credentials
+        payload = verify_token(token)
+        license_id = payload.get("license_id")
+        device_id = data.get("device_id")
+        logger.info(f"[DEBUG] Deactivating device: license_id={license_id}, device_id={device_id}")
 
-    if not device_id:
-        raise HTTPException(status_code=400, detail="device_id обязателен")
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id обязателен")
 
-    # Ищем записи лицензий этого пользователя с этим device_id
-    license_devices = db.query(LicenseDevice).join(License).filter(
-        LicenseDevice.device_id == device_id,
-        License.user_id == user_id
-    ).all()
+        # Ищем устройство для данной лицензии
+        license_devices = db.query(models.LicenseDevice).filter(
+            models.LicenseDevice.license_id == license_id,
+            models.LicenseDevice.device_id == device_id
+        ).all()
 
-    if not license_devices:
-        raise HTTPException(status_code=404, detail="Устройство не найдено у этого пользователя")
+        if not license_devices:
+            logger.info(f"[DEBUG] Device not found for license_id={license_id}, device_id={device_id}")
+            raise HTTPException(status_code=404, detail="Устройство не найдено для данной лицензии")
 
-    deleted_count = 0
-    for device in license_devices:
-        if device.license.license_type.code == "LICENSE-TRIAL":
-            continue  # не удаляем trial
-        db.delete(device)
-        deleted_count += 1
+        deleted_count = 0
+        for device in license_devices:
+            license = db.query(models.License).filter(models.License.id == device.license_id).first()
+            if license and license.license_type_code == "LICENSE-TRIAL":
+                logger.info(f"[DEBUG] Skipping trial license device: license_id={license.id}")
+                continue  # Не удаляем устройства для пробных лицензий
+            db.delete(device)
+            deleted_count += 1
 
-    db.commit()
+        db.commit()
+        logger.info(f"[DEBUG] Device deactivated: deleted_count={deleted_count}")
+        return {
+            "status": "ok",
+            "message": f"Устройство деактивировано. Удалено записей: {deleted_count}, пробные лицензии сохранены (если были)"
+        }
+    except jwt.PyJWTError as e:
+        logger.error(f"[ERROR] JWT error in deactivate_device: {str(e)}")
+        raise HTTPException(status_code=401, detail="Ошибка сервера, попробуйте позже")
+    except Exception as e:
+        logger.error(f"[ERROR] Unexpected error in deactivate_device: {str(e)}")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера, попробуйте позже")
 
-    return {
-        "status": "ok",
-        "message": f"Устройство деактивировано. Удалено записей: {deleted_count}, TRIAL сохранена (если была)"
-    }
 
 @app.post("/refresh_token")
-def refresh_token(request: TokenRefreshRequest, db: Session = Depends(get_db)):
+async def refresh_token(token_data: dict, db: Session = Depends(get_db)):
     try:
-        # Проверяем текущий токен
-        payload = verify_token(request.token)
+        token = token_data.get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Токен не предоставлен")
+
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
         license_id = payload.get("license_id")
         device_id = payload.get("device_id")
         user_id = payload.get("user_id")
+        if not license_id or not device_id:
+            raise HTTPException(status_code=401, detail="Невалидный токен")
 
-        # Проверяем, что лицензия всё ещё активна
+        logger.info(f"[DEBUG] Refreshing token for license_id={license_id}, device_id={device_id}")
         license = db.query(models.License).filter(models.License.id == license_id).first()
-        if not license:
-            raise HTTPException(status_code=404, detail="Лицензия не найдена")
-        if not license.is_active:
-            raise HTTPException(status_code=403, detail="Лицензия не активна")
+        if not license or not license.is_active:
+            logger.info(f"[DEBUG] License invalid or inactive: license_id={license_id}")
+            raise HTTPException(status_code=401, detail="Лицензия недействительна")
 
-        # Проверяем, что устройство привязано к лицензии
-        device = db.query(models.LicenseDevice).filter(
+        check_license_expiration(license, db)
+
+        license_device = db.query(models.LicenseDevice).filter(
             models.LicenseDevice.license_id == license_id,
             models.LicenseDevice.device_id == device_id
         ).first()
-        if not device:
-            raise HTTPException(status_code=403, detail="Устройство не активировано")
+        if not license_device:
+            logger.info(f"[DEBUG] Device not associated with license: license_id={license_id}, device_id={device_id}")
+            raise HTTPException(status_code=401, detail="Устройство не связано с лицензией")
 
-        # Проверяем срок действия лицензии
-        check_license_expiration(license, db)
-
-        # Создаём новый токен
-        access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
-        new_token = create_access_token(
-            data={"license_id": license_id, "device_id": device_id, "user_id": user_id},
-            expires_delta=access_token_expires
-        )
-        return {"access_token": new_token, "token_type": "bearer"}
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Токен истёк")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Неверный токен")
+        new_token_data = {"license_id": license_id, "device_id": device_id}
+        if license.user_id:
+            new_token_data["user_id"] = license.user_id
+        new_token = create_access_token(new_token_data, expires_delta=timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
+        logger.info(f"[DEBUG] New token created for license_id={license_id}")
+        return {"access_token": new_token}
+    except jwt.PyJWTError as e:
+        logger.error(f"[ERROR] JWT error in refresh_token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Невалидный токен")
     except Exception as e:
-        print(f"[DEBUG] Ошибка при обновлении токена: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Ошибка сервера: {str(e)}")
+        logger.error(f"[ERROR] Unexpected error in refresh_token: {str(e)}")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
