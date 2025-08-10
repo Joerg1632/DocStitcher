@@ -124,10 +124,14 @@ class AdminApp(QMainWindow):
         self.last_license_key = ""
 
         self.code_to_name = {
-            "LICENSE-1": "Лицензия на 1 устройство",
-            "LICENSE-5": "Лицензия на 5 устройств",
-            "LICENSE-15": "Лицензия на 15 устройств",
-            "LICENSE-UNLIMITED": "Лицензия без ограничений"
+            "LICENSE-UNLIMITED": "Безлимитная лицензия",
+            "LICENSE-TRIAL": "Пробная версия (2 дня, 1 устройство)",
+            "LICENSE-1-MONTH": "Лицензия на 1 устройство (1 месяц)",
+            "LICENSE-5-MONTH": "Лицензия на 5 устройств (1 месяц)",
+            "LICENSE-15-MONTH": "Лицензия на 15 устройств (1 месяц)",
+            "LICENSE-1-YEAR": "Лицензия на 1 устройство (1 год)",
+            "LICENSE-5-YEAR": "Лицензия на 5 устройств (1 год)",
+            "LICENSE-15-YEAR": "Лицензия на 15 устройств (1 год)"
         }
         self.load_license_types()
 

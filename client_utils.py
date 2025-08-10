@@ -62,12 +62,34 @@ def is_trial_valid(settings):
     except (jwt.InvalidTokenError, requests.RequestException):
         return False
 
-def verify_token(token):
+def verify_token(token, settings):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
         response = requests.get(f"{SERVER_URL}/verify", headers={"Authorization": f"Bearer {token}"})
-        return response.status_code == 200
-    except (jwt.InvalidTokenError, requests.RequestException):
+        if response.status_code == 200:
+            response_data = response.json()
+            if response_data.get("status") == "updated":
+                new_token = response_data.get("new_token")
+                if new_token:
+                    settings.setValue("license_token", new_token)
+                    settings.sync()
+                    print("[*] Токен обновлён в verify_token: устройство привязано к новой лицензии")
+            return True
+        elif response.status_code == 401 and response.json().get("detail") == "Токен истек":
+            response = requests.post(
+                f"{SERVER_URL}/refresh_token",
+                json={"token": token},
+                timeout=10
+            )
+            if response.status_code == 200:
+                new_token = response.json().get("access_token")
+                settings.setValue("license_token", new_token)
+                settings.sync()
+                return True
+            else:
+                return False
+        return False
+    except (jwt.InvalidTokenError, requests.RequestException) as e:
         return False
 
 def activate_license(license_key, device_id):

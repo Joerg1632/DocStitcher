@@ -14,7 +14,7 @@ from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QSettings, Qt, QTimer
 from file_processing import save, save_as, convert_to_pdf, convert_doc_to_pdf, convert_image_to_pdf, update_progress, apply_scan_effect
 from licensing import update_license_status, check_license_periodically, deactivate_device_action, \
-    on_change_license_clicked
+    on_change_license_clicked, show_license_info
 from client_utils import resource_path, get_device_id, verify_token, is_trial_valid, activate_license
 from config import SERVER_URL, SECRET_KEY
 
@@ -164,14 +164,17 @@ class MyWindow(QWidget):
         license_menu = QMenu(license_button)
         license_menu.setToolTipsVisible(True)
 
-        self.deactivate_action = license_menu.addAction("Деактивировать устройство")
         self.change_license_action = license_menu.addAction("Сменить лицензию")
+        self.deactivate_action = license_menu.addAction("Деактивировать устройство")
+        self.show_license_info_action = license_menu.addAction("Тип лицензии")
         license_button.setMenu(license_menu)
+        self.change_license_action.setToolTip("Сменить лицензию группы устройств на другую")
         self.deactivate_action.setToolTip("Деактивировать лицензию на текущем устройстве и освободить место лицензии")
-        self.change_license_action.setToolTip("Сменить лицензию на другую")
+        self.show_license_info_action.setToolTip("Получить информацию о лицензии на этом устройстве")
 
         self.deactivate_action.triggered.connect(self.deactivate_device_action)
         self.change_license_action.triggered.connect(self.on_change_license_clicked)
+        self.show_license_info_action.triggered.connect(self.show_license_info)
         self.list_widget = DragDropListWidget(self)
         self.list_widget.setDragDropMode(QListWidget.InternalMove)
         self.list_widget.setAcceptDrops(True)
@@ -227,7 +230,7 @@ class MyWindow(QWidget):
 
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self.check_license_periodically)
-        self.license_timer.start(3600000)
+        self.license_timer.start(300000)
 
         self.update_action_states()
 
@@ -284,6 +287,9 @@ class MyWindow(QWidget):
 
     def on_change_license_clicked(self):
         on_change_license_clicked(self)
+
+    def show_license_info(self):
+        show_license_info(self)
 
     def update_action_states(self):
         # This could also be moved to licensing.py if needed
@@ -393,7 +399,7 @@ if __name__ == '__main__':
     settings = QSettings("YourCompany", "DocStitcher")
     device_id = get_device_id()
     license_token = settings.value("license_token")
-    if license_token and verify_token(license_token):
+    if license_token and verify_token(license_token, settings):
         mainWin = MyWindow()
         mainWin.show()
     elif is_trial_valid(settings):
