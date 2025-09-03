@@ -275,7 +275,6 @@ class MyWindow(QWidget):
                 self.file_lst.pop(row)
         print(f"[*] Удалено {len(selected_items)} выбранных файлов")
 
-    # Delegate methods to licensing module
     def update_license_status(self):
         update_license_status(self)
 
@@ -292,7 +291,6 @@ class MyWindow(QWidget):
         show_license_info(self)
 
     def update_action_states(self):
-        # This could also be moved to licensing.py if needed
         settings = QSettings("YourCompany", "DocStitcher")
         license_token = settings.value("license_token")
         if license_token:

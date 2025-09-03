@@ -150,9 +150,8 @@ def process_page(page_num, doc_path, a4_width_px, a4_height_px, dpi, ribbon_posi
 
         if page_num < first_page_count and checkbox_bw:
             img = img.convert("L")
-        print(page_num)
 
-        margin_px = pt_to_px(5, dpi)  # Используем глобальную функцию pt_to_px
+        margin_px = pt_to_px(5, dpi)
         max_width = a4_width_px - 2 * margin_px
         max_height = a4_height_px - 2 * margin_px
         scale = min(max_width / img.width, max_height / img.height)

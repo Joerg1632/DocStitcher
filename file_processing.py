@@ -3,7 +3,7 @@ import sys
 import tempfile
 import time
 from PyQt5.QtWidgets import QMessageBox, QFileDialog
-from PyPDF2 import PdfMerger
+from pypdf import PdfWriter
 import pymupdf as fitz
 import comtypes.client
 from multiprocessing import Pool
@@ -38,13 +38,13 @@ def convert_to_pdf(window, doc_file):
         print(f"[!] Ошибка в docx2pdf: {e}")
         try:
             pythoncom.CoInitialize()
-            wdFormatPDF = 17
+            wd_format_pdf = 17
             word = comtypes.client.CreateObject('Word.Application')
             time.sleep(1.2)
             word.Visible = False
             word.DisplayAlerts = 0
             doc = word.Documents.Open(os.path.abspath(doc_file))
-            doc.SaveAs(temp_pdf, FileFormat=wdFormatPDF)
+            doc.SaveAs(temp_pdf, FileFormat=wd_format_pdf)
             doc.Close(False)
             word.Quit()
             print(f"[+] Конвертировано через comtypes: {doc_file}")
@@ -68,7 +68,7 @@ def convert_doc_to_pdf(window, doc_file):
         return None
     try:
         pythoncom.CoInitialize()
-        wdFormatPDF = 17
+        wd_format_pdf = 17
         temp_name = next(tempfile._get_candidate_names()) + '.pdf'
         temp_pdf = os.path.join(tempfile.gettempdir(), temp_name)
         word = comtypes.client.CreateObject('Word.Application')
@@ -76,7 +76,7 @@ def convert_doc_to_pdf(window, doc_file):
         word.DisplayAlerts = 0
         print(f"[*] Открытие документа: {doc_file}")
         doc = word.Documents.Open(os.path.abspath(doc_file))
-        doc.SaveAs(temp_pdf, FileFormat=wdFormatPDF)
+        doc.SaveAs(temp_pdf, FileFormat=wd_format_pdf)
         doc.Close(False)
         word.Quit()
         print(f"[+] Конвертировано .doc через comtypes: {doc_file}")
@@ -146,7 +146,7 @@ def save(window):
     doc_first = fitz.open(first_pdf_path)
     window.first_page_count = len(doc_first)
     doc_first.close()
-    pdf_merger = PdfMerger()
+    pdf_merger = PdfWriter()
     for pdf_file in pdf_lst:
         try:
             pdf_merger.append(pdf_file)
@@ -221,7 +221,7 @@ def save_as(window):
     doc_first = fitz.open(first_pdf_path)
     window.first_page_count = len(doc_first)
     doc_first.close()
-    pdf_merger = PdfMerger()
+    pdf_merger = PdfWriter()
     for pdf_file in pdf_lst:
         try:
             pdf_merger.append(pdf_file)

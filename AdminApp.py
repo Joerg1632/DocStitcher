@@ -7,7 +7,7 @@ from uuid import uuid4
 import pyperclip
 import os
 
-SERVER_URL = "http://78.155.197.174:8000"
+SERVER_URL = "http://localhost:8000"
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
