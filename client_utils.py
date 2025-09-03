@@ -220,6 +220,7 @@ def process_page(page_num, doc_path, a4_width_px, a4_height_px, dpi, ribbon_posi
                 new_img.paste(dot_resized, (dot_x, dot_y), dot_resized)
 
         temp_img_path = os.path.join(tempfile.gettempdir(), next(tempfile._get_candidate_names()) + ".jpg")
+        # Можно подрубить subsampling = 2, на взгляд ничего не меняется, но размер файла уменьшается на ~22%, мб quality понизить на 10
         new_img.save(temp_img_path, "JPEG", dpi=(dpi, dpi), quality=100, subsampling=0, optimize=True)
         return page_num, temp_img_path
     except Exception as e:
