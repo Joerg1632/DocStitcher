@@ -11,7 +11,7 @@ import pythoncom
 from docx2pdf import convert
 import img2pdf
 
-from client_utils import pt_to_px, resource_path, get_max_workers, process_page
+from client.client_utils import pt_to_px, resource_path, get_max_workers, process_page
 
 white_list = ['.doc', '.docx', '.pdf', '.jpg', '.jpeg', '.png']
 
@@ -275,12 +275,12 @@ def apply_scan_effect(window, pdf_path, output_pdf=None):
             window.progress_bar.setVisible(False)
             return output_pdf
         window.progress_count = 0
-        ribbon_path = resource_path("assets/ribbons/ribbon.png")
-        ribbon_left_path = resource_path("assets/ribbons/ribbon_left.png")
-        ribbon_middle_path = resource_path("assets/ribbons/ribbon_middle.png")
-        dot1_path = resource_path("assets/dots/dot1.png")
-        dot2_path = resource_path("assets/dots/dot2.png")
-        dot_mid_path = resource_path("assets/dots/middle_dot.png")
+        ribbon_path = resource_path("../assets/ribbons/ribbon.png")
+        ribbon_left_path = resource_path("../assets/ribbons/ribbon_left.png")
+        ribbon_middle_path = resource_path("../assets/ribbons/ribbon_middle.png")
+        dot1_path = resource_path("../assets/dots/dot1.png")
+        dot2_path = resource_path("../assets/dots/dot2.png")
+        dot_mid_path = resource_path("../assets/dots/middle_dot.png")
         temp_images = [None] * page_count
         max_workers = get_max_workers(page_count)
         with Pool(processes=max_workers) as pool:

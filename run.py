@@ -12,11 +12,11 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QSettings, Qt, QTimer
-from file_processing import save, save_as, convert_to_pdf, convert_doc_to_pdf, convert_image_to_pdf, update_progress, apply_scan_effect
-from licensing import update_license_status, check_license_periodically, deactivate_device_action, \
+from client.file_processing import save, save_as, convert_to_pdf, convert_doc_to_pdf, convert_image_to_pdf, update_progress, apply_scan_effect
+from client.licensing import update_license_status, check_license_periodically, deactivate_device_action, \
     on_change_license_clicked, show_license_info
-from client_utils import resource_path, get_device_id, verify_token, is_trial_valid, activate_license
-from config import SERVER_URL, SECRET_KEY
+from client.client_utils import resource_path, get_device_id, verify_token, is_trial_valid, activate_license
+from client.config import SERVER_URL, SECRET_KEY
 
 white_list = ['.doc', '.docx', '.pdf', '.jpg', '.jpeg', '.png']
 

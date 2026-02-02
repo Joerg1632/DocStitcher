@@ -3,7 +3,6 @@ import uuid
 from fastapi import FastAPI, HTTPException, Depends, Security, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-
 from backend.dbase import SessionLocal
 from backend import models
 from sqlalchemy.orm import Session, joinedload
@@ -31,8 +30,6 @@ if not SECRET_KEY:
     raise ValueError("SECRET_KEY не установлен в переменных окружения")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
-
-# ------------------------ Pydantic модели ------------------------
 
 class TokenRefreshRequest(BaseModel):
     token: str
@@ -63,7 +60,6 @@ class LicenseTypeCreate(BaseModel):
 
 class TrialActivateRequest(BaseModel):
     device_id: str
-# ------------------------ Вспомогательные функции ------------------------
 
 def get_db():
     db = SessionLocal()
@@ -97,7 +93,6 @@ def check_license_expiration(license, db: Session):
             db.commit()
             raise HTTPException(status_code=403, detail="Лицензия истекла")
 
-# ------------------------ Эндпоинты ------------------------
 @app.post("/activate_trial")
 def activate_trial(device_id: str = Form(...), db: Session = Depends(get_db)):
     # Проверка, активирована ли пробная версия на этом устройстве
@@ -464,7 +459,6 @@ async def deactivate_device(data: dict, credentials: HTTPAuthorizationCredential
     except Exception as e:
         logger.error(f"[ERROR] Unexpected error in deactivate_device: {str(e)}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера, попробуйте позже")
-
 
 @app.post("/refresh_token")
 async def refresh_token(token_data: dict, db: Session = Depends(get_db)):

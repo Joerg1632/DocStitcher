@@ -226,4 +226,3 @@ def process_page(page_num, doc_path, a4_width_px, a4_height_px, dpi, ribbon_posi
     except Exception as e:
         print(f"[!] Ошибка при обработке страницы {page_num}: {e}")
         return page_num, None
-

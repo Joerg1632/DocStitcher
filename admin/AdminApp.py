@@ -6,8 +6,7 @@ import requests
 from uuid import uuid4
 import pyperclip
 import os
-
-SERVER_URL = "http://localhost:8000"
+from client.config import SERVER_URL
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -19,8 +18,8 @@ def resource_path(relative_path):
 class AdminApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DocStitcher Admin")
-        self.setWindowIcon(QIcon(resource_path("assets/app_icon.png")))
+        self.setWindowTitle("DocStitcher admin")
+        self.setWindowIcon(QIcon(resource_path("../assets/app_icon.png")))
         self.setGeometry(100, 100, 500, 300)
         self.setMinimumSize(400, 250)
 

@@ -3,11 +3,14 @@ build/
 *.exe
 *.pkg
 *.spec
-.venv/
+
 Итоговые документы/
 *.jpg
 *.doc
 *.docx
 *.pdf
+
 .env
 backend/.env
+
+ref/
